@@ -19,8 +19,9 @@ const keyXY = struct {
 };
 
 const DirectionMoving = struct { key: keyXY, entered: u8, exit: u8, movesMade: i128 = 1 };
-const Directions = struct { N: bool, E: bool, S: bool, W: bool };
+const Directions = struct { N: bool, E: bool, S: bool, W: bool, value: u8 };
 const myGrid = std.AutoHashMap(keyXY, Directions);
+const polygonMap = std.AutoHashMap(keyXY, u8);
 
 pub fn startProcess(input: []const u8) !Answer {
     var result: Answer = .{};
@@ -39,11 +40,11 @@ pub fn startProcess(input: []const u8) !Answer {
     var maxX: i128 = 0;
     var maxY: i128 = 0;
     var startKey: keyXY = .{};
-    var thisTurns: Directions = .{ .E = false, .N = false, .S = false, .W = false };
+    var thisTurns: Directions = .{ .E = false, .N = false, .S = false, .W = false, .value = ' ' };
     while (it.next()) |dataRow| {
         for (dataRow) |char| {
-            std.debug.print("{c}", .{char});
-            thisTurns = .{ .E = false, .N = false, .S = false, .W = false };
+            //std.debug.print("{c}", .{char});
+            thisTurns = .{ .E = false, .N = false, .S = false, .W = false, .value = char };
             if (char == 'F') {
                 thisTurns.E = true;
                 thisTurns.S = true;
@@ -71,38 +72,89 @@ pub fn startProcess(input: []const u8) !Answer {
             try directionMap.put(key, thisTurns);
             x += 1;
         }
-        std.debug.print("\n", .{});
+        //std.debug.print("\n", .{});
         y += 1;
-        maxX = x;
+        maxX = x - 1;
         x = 0;
     }
-    maxY = y;
-
-   for (0..5) |yIdx| {
-        for (0..5) |xIdx|{
-            const tempKey: keyXY = .{ .x = xIdx, .y = yIdx };
-            const value:Directions = directionMap.get(tempKey).?;
-            std.debug.print("x{}:y{}:{any}\n", .{xIdx, yIdx, value});
-        }
-       std.debug.print("\n", .{});
-    }
+    maxY = y - 1;
 
     std.debug.print("Final Looking For:{any}\n", .{startKey});
-    var tempKey: DirectionMoving = getStartDirection(startKey, &directionMap, maxX, maxY);
-     while (true){
-        std.debug.print("K next:{any} Enter:{c} Exit:{c}  Move:{}\n", .{ tempKey.key, tempKey.entered, tempKey.exit, tempKey.movesMade });
+    var tempKey: DirectionMoving = try getStartDirection(startKey, &directionMap, maxX, maxY);
 
-        tempKey = followThePath(startKey, tempKey, &directionMap);
-        if (tempKey.key.eql(startKey))
-            {
-                break;
-            }
+    var polygon = polygonMap.init(allocator);
+    defer polygon.deinit();
+
+   var check: Directions  = directionMap.get(tempKey.key).?;
+    try polygon.put(tempKey.key, check.value);
+    std.debug.print("Add: {c}, {c}, {},{}; {c}\n", .{ tempKey.entered, tempKey.exit, tempKey.key.x, tempKey.key.y ,check.value});
+
+
+    while (true) {
+        //std.debug.print("K next:{any} Enter:{c} Exit:{c}  Move:{}\n", .{ tempKey.key, tempKey.entered, tempKey.exit, tempKey.movesMade });
+
+        tempKey = try followThePath( tempKey, &directionMap);
+
+        check = directionMap.get(tempKey.key).?;
+        std.debug.print("Add: {c}, {c}, {},{}; {c}\n", .{ tempKey.entered, tempKey.exit, tempKey.key.x, tempKey.key.y ,check.value});
+
+        try polygon.put(tempKey.key, check.value);
+        if (tempKey.key.eql(startKey)) {
+            break;
+        }
     }
-        result.part1 = @divTrunc(tempKey.movesMade , 2);
+    std.debug.print("......\n", .{});
+    result.part2 = part2(&polygon, maxX, maxY);
+    result.part1 = @divTrunc(tempKey.movesMade, 2);
     return result;
 }
+pub fn part2(poly: *polygonMap, maxX: i128, maxY: i128) i128 {
+    var yIdx: i128 = 0;
+    var counter: i128 = 0;
+    var value: u8 = '%';
+    while (true) {
+        var xIdx: i128 = 0;
+        var inside: bool = false;
+        while (true) {
+            const nextKey: keyXY = .{ .x = xIdx, .y = yIdx };
+            if (poly.contains(nextKey)) {
+                value = poly.get(nextKey) orelse  '?';
+                if (value == '-') {
+                    std.debug.print("{c}", .{value});
+                } else {
+                    inside = !inside;
+                    if (inside) {
+                        std.debug.print("s", .{});
+                    }
+                    else {
+                        std.debug.print("{c}", .{value});
+                    }
+                }
+            } else {
+                if (inside) {
+                    std.debug.print("*", .{});
+                    counter += 1;
+                } else {
+                    std.debug.print("O", .{});
+                }
+            }
+            xIdx += 1;
+            if (xIdx > maxX) {
+                break;
+            }
+        }
+        std.debug.print(": {}\n", .{counter});
+        yIdx += 1;
+        if (yIdx > maxY) {
+            break;
+        }
+    }
 
-pub fn followThePath(finalKey: keyXY, key: DirectionMoving, directionMap: *myGrid) DirectionMoving {
+    //https://en.wikipedia.org/wiki/Point_in_polygon
+
+    return counter;
+}
+pub fn followThePath( key: DirectionMoving, directionMap: *myGrid) !DirectionMoving {
     var exit: u8 = key.exit;
     var entrance: u8 = key.exit;
     var newY = key.key.y;
@@ -126,14 +178,15 @@ pub fn followThePath(finalKey: keyXY, key: DirectionMoving, directionMap: *myGri
     }
 
     const tempKey: keyXY = .{ .x = newX, .y = newY };
-    if (tempKey.eql(finalKey)){
-        const setDirections: DirectionMoving = .{ .key = tempKey, .entered = entrance, .exit = 'x', .movesMade = counter };
 
-        return setDirections;
-    }
+   // if (tempKey.eql(finalKey)) {
+   //     const setDirections: DirectionMoving = .{ .key = tempKey, .entered = entrance, .exit = 'x', .movesMade = counter };
+    //     return setDirections;
+   // }
     const thisTurns: Directions = directionMap.get(tempKey).?;
+
     if (thisTurns.N and entrance == 'N') {
-        std.debug.print("North = : {any}", .{thisTurns});
+        //std.debug.print("North = : {any}", .{thisTurns});
         if (thisTurns.E) {
             exit = 'E';
         }
@@ -145,7 +198,7 @@ pub fn followThePath(finalKey: keyXY, key: DirectionMoving, directionMap: *myGri
         }
     }
     if (thisTurns.S and entrance == 'S') {
-        std.debug.print("South: {any}", .{thisTurns});
+        //std.debug.print("South: {any}", .{thisTurns});
         if (thisTurns.E) {
             exit = 'E';
         }
@@ -157,7 +210,7 @@ pub fn followThePath(finalKey: keyXY, key: DirectionMoving, directionMap: *myGri
         }
     }
     if (thisTurns.E and entrance == 'E') {
-        std.debug.print("East: {any}", .{thisTurns});
+        //std.debug.print("East: {any}", .{thisTurns});
         if (thisTurns.S) {
             exit = 'S';
         }
@@ -169,7 +222,7 @@ pub fn followThePath(finalKey: keyXY, key: DirectionMoving, directionMap: *myGri
         }
     }
     if (thisTurns.W and entrance == 'W') {
-        std.debug.print("West: {any}", .{thisTurns});
+        //std.debug.print("West: {any}", .{thisTurns});
         if (thisTurns.S) {
             exit = 'S';
         }
@@ -181,20 +234,21 @@ pub fn followThePath(finalKey: keyXY, key: DirectionMoving, directionMap: *myGri
         }
     }
     const setDirections: DirectionMoving = .{ .key = tempKey, .entered = entrance, .exit = exit, .movesMade = counter };
-    std.debug.print("Count: {}\n", .{counter});
+    ////std.debug.print("Count: {}\n", .{counter});
     return setDirections;
 }
-pub fn getStartDirection(key: keyXY, directionMap: *myGrid, maxX: i128, maxY: i128) DirectionMoving {
-    var setDirections: DirectionMoving = .{ .key = key, .entered = 'x', .exit = 'x', .movesMade = 1 };
+pub fn getStartDirection(key: keyXY, directionMap: *myGrid, maxX: i128, maxY: i128) !DirectionMoving {
+    var setDirections: DirectionMoving = .{ .key = key, .entered = 'x', .exit = 'x', .movesMade = 0 };
     var exit: u8 = undefined;
 
     if (key.y < maxY) {
         const newY = key.y + 1;
         const tempKey: keyXY = .{ .x = key.x, .y = newY };
         const thisTurns: Directions = directionMap.get(tempKey).?;
-        std.debug.print("Look Down:{any}\n", .{thisTurns});
+
+        ////std.debug.print("Look Down:{any}\n", .{thisTurns});
         if (thisTurns.N) {
-            std.debug.print("Up True = : {any}", .{thisTurns});
+            //std.debug.print("Up True = : {any}", .{thisTurns});
             if (thisTurns.E) {
                 exit = 'E';
             }
@@ -212,9 +266,10 @@ pub fn getStartDirection(key: keyXY, directionMap: *myGrid, maxX: i128, maxY: i1
         const newY = key.y - 1;
         const tempKey: keyXY = .{ .x = key.x, .y = newY };
         const thisTurns: Directions = directionMap.get(tempKey).?;
-        std.debug.print("Turn:{any}\n", .{thisTurns});
+
+        ////std.debug.print("Turn:{any}\n", .{thisTurns});
         if (thisTurns.S) {
-            std.debug.print("Turns: {any}", .{thisTurns});
+            ////std.debug.print("Turns: {any}", .{thisTurns});
             if (thisTurns.E) {
                 exit = 'E';
             }
@@ -232,9 +287,10 @@ pub fn getStartDirection(key: keyXY, directionMap: *myGrid, maxX: i128, maxY: i1
         const newX = key.x + 1;
         const tempKey: keyXY = .{ .x = newX, .y = key.y };
         const thisTurns: Directions = directionMap.get(tempKey).?;
-        std.debug.print("Turn:{any}\n", .{thisTurns});
+
+        ////std.debug.print("Turn:{any}\n", .{thisTurns});
         if (thisTurns.E) {
-            std.debug.print("Turns: {any}", .{thisTurns});
+            //std.debug.print("Turns: {any}", .{thisTurns});
             if (thisTurns.S) {
                 exit = 'S';
             }
@@ -252,9 +308,10 @@ pub fn getStartDirection(key: keyXY, directionMap: *myGrid, maxX: i128, maxY: i1
         const newX = key.x - 1;
         const tempKey: keyXY = .{ .x = newX, .y = key.y };
         const thisTurns: Directions = directionMap.get(tempKey).?;
-        std.debug.print("Turn:{any}\n", .{thisTurns});
+
+        //std.debug.print("Turn:{any}\n", .{thisTurns});
         if (thisTurns.W) {
-            std.debug.print("Turns: {any}", .{thisTurns});
+            //std.debug.print("Turns: {any}", .{thisTurns});
             if (thisTurns.S) {
                 exit = 'S';
             }
@@ -277,16 +334,14 @@ pub fn main() !void {
 }
 
 test "part1_test" {
-    std.debug.print("\nTest 1\n", .{});
     const input = @embedFile("Part1Example.txt");
     const result: Answer = try startProcess(input);
     std.debug.print("Result: {any}\n", .{result});
-    try std.testing.expect(result.part1 == 8);
+    try std.testing.expect(result.part1 == 70);
 }
 test "part2_test" {
-    std.debug.print("\nTest 2\n", .{});
     const input = @embedFile("Part1Example.txt");
     const result: Answer = try startProcess(input);
     std.debug.print("Result: {any}\n", .{result});
-    try std.testing.expect(result.part2 == 999);
+    try std.testing.expect(result.part2 == 8);
 }
